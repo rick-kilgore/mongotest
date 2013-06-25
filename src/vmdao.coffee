@@ -2,37 +2,53 @@ mongo = require('mongodb')
 
 
 class VMDao
-    constructor: () ->
-
-    init: (appCtx, callback) ->
-        console.log 'VMDao.init: appCtx = %j', appCtx
-        @server = new mongo.Server(appCtx.host, appCtx.port, {auto_reconnect: true})
-        @db = new mongo.Db(appCtx.dbName, @server, { journal: true })
-        @collectionName = appCtx.collection
-        _this = this
-        @db.open (err, db) ->
+    constructor: (@host, @port) ->
+        @server = new mongo.Server('127.0.0.1', 27017, {auto_reconnect: true})
+        @db = new mongo.Db('test', @server, { journal: true })
+        @opened = false
+        openHandler = (err, db) =>
                     if err?
                         console.log(err)
                         client.close()
                         throw err
-                    console.log('retrieving collection names...')
-                    appCtx.db = db
-                    appCtx.vmdao = _this
-                    db.collectionNames (err, collections) ->
-                        console.log(collections)
-                        callback()
+                    @opened = true
+                    console.log('opened = %s, this = %s, retrieving collection names...', @opened, @)
+                    for field of this
+                        console.log '%s = %s', field, this[field]
+                    db.collectionNames((err, collections) ->
+                        console.log("done.")
+                        console.log(collections))
+        @db.open openHandler
 
     getCollection: (callback) ->
+        cb = () => @_getCollection callback
+        @_waitForOpened cb
+
+    findDocs: (callback) ->
+        @_waitForOpened () => @_findDocs callback
+
+    close: () -> @db.close()
+
+
+    _waitForOpened: (callback) ->
+        if @opened
+            callback()
+        else
+            console.log('waiting for DB connection to open: opened = %s, this = %s', @opened, @, callback)
+            cb = () => @_waitForOpened callback
+            setTimeout(cb, 100)
+
+    _getCollection: (callback) ->
         console.log("retrieving collection...")
-        @db.collection(@collectionName, (error, collection) ->
+        @db.collection('testData', (error, collection) ->
             if error?
                 callback(error)
             else
-                console.log('found collection %s', collection.collectionName)
+                console.log('found collection.')
                 callback(null, collection))
 
-    findDocs: (callback) ->
-        @getCollection (error, collection) ->
+    _findDocs: (callback) ->
+        @_getCollection (error, collection) ->
             if error
                 callback(error)
             else
@@ -41,23 +57,5 @@ class VMDao
                     console.log("find() returned.")
                     if error then callback(error)
                     else callback(null, results))
-
-    insertDocs: (docs, callback) ->
-        @getCollection (error, collection) =>
-            if error
-                callback(error)
-            else
-                @_doInsert docs, 0, collection, callback
-
-    _doInsert: (docs, index, collection, callback) ->
-        if index >= docs.length
-            callback()
-        else
-            console.log "inserting #{index}..."
-            batch = docs[index...index+100]
-            collection.insert batch, {safe: true}, () =>
-                @_doInsert docs, index+100, collection, callback
-
-    close: () -> @db.close()
 
 module.exports = VMDao
